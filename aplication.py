@@ -159,25 +159,28 @@ def server_mode(args):
     start_time = time.time()
     sock.settimeout(None)
     while True:
-        data, _ = sock.recvfrom(HEADER_SIZE + DATA_CHUNK)
-        if not data:
-            break
+          data, _ = sock.recvfrom(HEADER_SIZE + DATA_CHUNK)
         seq, ackn, flags, window = unpack_header(data)
-        # FIN?
+
         if flags & FLAG_FIN:
-            teardown_server(sock, addr)
+            print(f"{timestamp()} -- FIN packet is received")
+            finack = pack_header(0, 0, FLAG_ACK, 0)
+            sock.sendto(finack, addr)
+            print(f"{timestamp()} -- FIN-ACK packet is sent")
             break
-        if seq == expected_seq:
-            print(f"{timestamp()} -- packet {seq} is received")
-            f.write(data[HEADER_SIZE:])
-            expected_seq += 1
-            # send ACK
-            ack_pkt = pack_header(0, seq, FLAG_ACK, args.window)
-            sock.sendto(ack_pkt, addr)
-            print(f"{timestamp()} -- sending ack for the received {seq} ")
+
+        if len(data) > HEADER_SIZE:
+            if seq == expected_seq:
+                print(f"{timestamp()} -- packet {seq} is received")
+                f.write(data[HEADER_SIZE:])
+                expected_seq += 1
+                ack_pkt = pack_header(0, seq, FLAG_ACK, args.window)
+                sock.sendto(ack_pkt, addr)
+                print(f"{timestamp()} -- sending ack for the received {seq}")
+            else:
+                print(f"{timestamp()} -- out-of-order packet {seq} is received and discarded")
         else:
-            print(f"{timestamp()} -- out-of-order packet {seq} is received")
-            # discard
+            print(f"{timestamp()} -- empty or invalid packet received (ignored)")
     f.close()
     elapsed = time.time() - start_time
     size_MB = os.path.getsize(filename) / (1000*1000)
