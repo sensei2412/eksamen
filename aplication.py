@@ -152,14 +152,15 @@ def server_mode(args):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.ip, args.port))
     addr = three_way_handshake_server(sock)
-    # open file to write
+
     filename = f"received_{int(time.time())}"
     f = open(filename, 'wb')
     expected_seq = 1
     start_time = time.time()
     sock.settimeout(None)
+
     while True:
-          data, _ = sock.recvfrom(HEADER_SIZE + DATA_CHUNK)
+        data, _ = sock.recvfrom(HEADER_SIZE + DATA_CHUNK)
         seq, ackn, flags, window = unpack_header(data)
 
         if flags & FLAG_FIN:
@@ -181,12 +182,12 @@ def server_mode(args):
                 print(f"{timestamp()} -- out-of-order packet {seq} is received and discarded")
         else:
             print(f"{timestamp()} -- empty or invalid packet received (ignored)")
+
     f.close()
     elapsed = time.time() - start_time
-    size_MB = os.path.getsize(filename) / (1000*1000)
-    throughput = (size_MB * 8) / elapsed  # Mbps
+    size_MB = os.path.getsize(filename) / (1000 * 1000)
+    throughput = (size_MB * 8) / elapsed
     print(f"The throughput is {throughput:.2f} Mbps")
-
 
 def main():
     parser = argparse.ArgumentParser()
