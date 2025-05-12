@@ -97,16 +97,16 @@ def client_mode(args):
     server_addr = (args.ip, args.port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
-    # Etabler forbindelse og hent mottakerens vindu
+    # 1. Treveis-håndtrykk og hent mottakerens vindu:
     receiver_window = three_way_handshake_client(sock, server_addr)
     
-    # Juster senderens vindu til å være minimum av klientens ønskede vindu og mottakerens vindu
+    # 2. Juster senderens vindu:
     window_size = min(args.window, receiver_window)
     
+    # 3. Pakk filen i DATA_CHUNK-chunks, med header som bruker window_size
     base = 1
     next_seq = 1
     packets = []
-
     with open(args.file, 'rb') as f:
         chunk = f.read(DATA_CHUNK)
         while chunk:
@@ -115,6 +115,7 @@ def client_mode(args):
             next_seq += 1
             chunk = f.read(DATA_CHUNK)
 
+    # 4. Go-Back-N med window_size
     total_packets = len(packets)
     sock.settimeout(TIMEOUT)
     next_to_send = 1
@@ -139,7 +140,7 @@ def client_mode(args):
 
     print("Data Finished")
     teardown_client(sock, server_addr)
-
+    
 
 def server_mode(args):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
