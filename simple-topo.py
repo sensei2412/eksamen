@@ -1,94 +1,63 @@
-import argparse
-import re
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.node import Node
 from mininet.log import setLogLevel, info
+from mininet.cli import CLI
 from mininet.link import TCLink
 
-class LinuxRouter(Node):
-    """A Node with IP forwarding enabled."""
-    def config(self, **params):
-        super(LinuxRouter, self).config(**params)
-        self.cmd('sysctl net.ipv4.ip_forward=1')
 
-    def terminate(self):
-        self.cmd('sysctl net.ipv4.ip_forward=0')
-        super(LinuxRouter, self).terminate()
+class LinuxRouter( Node ):
+    """A Node with IP forwarding enabled.
+    Means that every packet that is in this node, comunicate freely with its interfaces."""
 
-class NetworkTopo(Topo):
-    def build(self, **_opts):
-        h1 = self.addHost('h1', ip=None)
-        r = self.addNode('r', cls=LinuxRouter, ip=None)
-        h2 = self.addHost('h2', ip=None)
-        self.addLink(h1, r, params1={'ip': '10.0.0.1/24'}, params2={'ip': '10.0.0.2/24'})
-        self.addLink(r, h2, params1={'ip': '10.0.1.1/24'}, params2={'ip': '10.0.1.2/24'})
+    def config( self, **params ):
+        super( LinuxRouter, self).config( **params )
+        self.cmd( 'sysctl net.ipv4.ip_forward=1' )
 
-def parse_throughput(output):
-    m = re.search(r'The throughput is ([0-9.]+) Mbps', output)
-    return float(m.group(1)) if m else None
+    def terminate( self ):
+        self.cmd( 'sysctl net.ipv4.ip_forward=0' )
+        super( LinuxRouter, self ).terminate()
 
 
-def run_experiments(net, server_ip, server_port, filename):
-    h1, h2, r = net['h1'], net['h2'], net['r']
-    window_sizes = [3, 5, 10, 15, 20, 25]
-    rtts = [50, 100, 200]
-    losses = [0, 2, 5, 50]
-    results = {}
+class NetworkTopo( Topo ):
 
-    # Ensure static qdisc
-    info('*** Base RTT tests (100ms, no loss)\n')
-    r.cmd('tc qdisc del dev r-eth1 root || true')
-    r.cmd('tc qdisc add dev r-eth1 root netem delay 100ms')
-    for w in window_sizes:
-        h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-        out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-        results[f'100ms_w{w}'] = parse_throughput(out)
-        h2.cmd('pkill -f application.py')
+    def build( self, **_opts ):		
+        h1=self.addHost("h1",ip=None)
+        r=self.addNode("r",cls=LinuxRouter,ip=None)
+        h2=self.addHost("h2",ip=None)
+        self.addLink(h1,r,params1={ 'ip' : '10.0.0.1/24' },params2={ 'ip' : '10.0.0.2/24' })#,max_queue_size=834, use_htb=True)
+        self.addLink(r,h2,params1={ 'ip' : '10.0.1.1/24' },params2={ 'ip' : '10.0.1.2/24' }) #, bw=100, delay='25ms')#, max_queue_size=834, use_htb=True)
 
-    # RTT variation
-    for rtt in rtts:
-        info(f'*** RTT tests ({rtt}ms)\n')
-        r.cmd('tc qdisc del dev r-eth1 root || true')
-        r.cmd(f'tc qdisc add dev r-eth1 root netem delay {rtt}ms')
-        for w in window_sizes:
-            h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-            out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-            results[f'{rtt}ms_w{w}'] = parse_throughput(out)
-            h2.cmd('pkill -f application.py')
+topo = NetworkTopo()
+net = Mininet( topo=topo, link=TCLink )
+net.start()
 
-    # Loss variation at 100ms
-    info('*** Loss tests at 100ms\n')
-    for loss in losses[1:]:
-        r.cmd('tc qdisc del dev r-eth1 root || true')
-        r.cmd(f'tc qdisc add dev r-eth1 root netem delay 100ms loss {loss}%')
-        for w in window_sizes:
-            h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-            out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-            results[f'loss{loss}_w{w}'] = parse_throughput(out)
-            h2.cmd('pkill -f application.py')
+#ip route add ipA via ipB dev INTERFACE
+#every packet going to ipA must first go to ipB using INTERFACE
+net["h1"].cmd("ip route add 10.0.1.2 via 10.0.0.2 dev h1-eth0")
+net["h2"].cmd("ip route add 10.0.0.1 via 10.0.1.1 dev h2-eth0")
+#this command is just to r3 ping r2 work, because it will use the correct ip
+net["h2"].cmd("ip route add 10.0.0.2 via 10.0.1.1 dev h2-eth0")
 
-    # Print results
-    info('\n*** Results:\n')
-    for k in sorted(results):
-        info(f'{k}: {results[k]} Mbps\n')
+# this adds a delay of 100ms - if you ping h2 from h1, the RTT will be 100ms 
+net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms")
+#net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms loss 2%")
+
+net["h1"].cmd("ethtool -K h1-eth0 tso off")
+net["h1"].cmd("ethtool -K h1-eth0 gso off")
+net["h1"].cmd("ethtool -K h1-eth0 lro off")
+net["h1"].cmd("ethtool -K h1-eth0 gro off")
+net["h1"].cmd("ethtool -K h1-eth0 ufo off")
 
 
-def main():
-    setLogLevel('info')
-    topo = NetworkTopo()
-    net = Mininet(topo=topo, link=TCLink)
-    net.start()
-    net['h1'].cmd('ip route add 10.0.1.0/24 via 10.0.0.2')
-    net['h2'].cmd('ip route add 10.0.0.0/24 via 10.0.1.1')
-    # disable offloads
-    for host in ('h1','h2'):
-        for opt in ('tso','gso','lro','gro','ufo'):
-            net[host].cmd(f'ethtool -K {host}-eth0 {opt} off')
-    net.pingAll()
-    # run experiments (assumes test10MB.bin exists on h1)
-    run_experiments(net, server_ip='10.0.1.2', server_port=8080, filename='test10MB.bin')
-    net.stop()
+net["h2"].cmd("ethtool -K h2-eth0 tso off")
+net["h2"].cmd("ethtool -K h2-eth0 gso off")
+net["h2"].cmd("ethtool -K h2-eth0 lro off")
+net["h2"].cmd("ethtool -K h2-eth0 gro off")
+net["h2"].cmd("ethtool -K h2-eth0 ufo off")
 
-if __name__ == '__main__':
-    main()
+
+
+net.pingAll()
+CLI( net )
+net.stop()
