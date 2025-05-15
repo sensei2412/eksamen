@@ -41,7 +41,12 @@ net["h2"].cmd("ip route add 10.0.0.2 via 10.0.1.1 dev h2-eth0")
 
 # this adds a delay of 100ms - if you ping h2 from h1, the RTT will be 100ms 
 net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms")
+#net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 50ms")
+#net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 200ms")
+
 #net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms loss 2%")
+#net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms loss 5%")
+#net["r"].cmd("tc qdisc add dev r-eth1 root netem delay 100ms loss 50%")
 
 net["h1"].cmd("ethtool -K h1-eth0 tso off")
 net["h1"].cmd("ethtool -K h1-eth0 gso off")
