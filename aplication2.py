@@ -51,25 +51,22 @@ def timestamp():
 def three_way_handshake_client(sock, server_addr):
     sock.settimeout(TIMEOUT)
 
-    # 1. Send SYN
     print("SYN packet is sent", flush=True)
     syn_pkt = pack_header(0, 0, FLAG_SYN, 0)
     sock.sendto(syn_pkt, server_addr)
 
-    # 2. Receive SYN-ACK
     try:
         data, _ = sock.recvfrom(HEADER_SIZE)
     except socket.timeout:
         print("Connection failed: no SYN-ACK received", flush=True)
         sys.exit(1)
 
-    seq, ack, flags, window = unpack_header(data)
+    seq, _, flags, window = unpack_header(data)
     if not (flags & FLAG_SYN and flags & FLAG_ACK):
         print("Unexpected handshake response", flush=True)
         sys.exit(1)
     print("SYN-ACK packet is received", flush=True)
 
-    # 3. Send ACK
     print("ACK packet is sent", flush=True)
     ack_pkt = pack_header(0, seq + 1, FLAG_ACK, 0)
     sock.sendto(ack_pkt, server_addr)
@@ -78,21 +75,18 @@ def three_way_handshake_client(sock, server_addr):
     return window
 
 def three_way_handshake_server(sock):
-    # 1. Receive SYN
     data, addr = sock.recvfrom(HEADER_SIZE)
     seq, _, flags, _ = unpack_header(data)
     if not (flags & FLAG_SYN):
         raise RuntimeError("Expected SYN")
     print("SYN packet is received", flush=True)
 
-    # 2. Send SYN-ACK
     synack = pack_header(0, seq + 1, FLAG_SYN | FLAG_ACK, DEFAULT_RECEIVER_WINDOW)
     sock.sendto(synack, addr)
     print("SYN-ACK packet is sent", flush=True)
 
-    # 3. Receive ACK
     data, _ = sock.recvfrom(HEADER_SIZE)
-    _, ackn, flags2, _ = unpack_header(data)
+    _, _, flags2, _ = unpack_header(data)
     if not (flags2 & FLAG_ACK):
         raise RuntimeError("Expected ACK")
     print("ACK packet is received", flush=True)
@@ -100,17 +94,15 @@ def three_way_handshake_server(sock):
 
     return addr
 
-# --- Teardown ---
+# --- Client Teardown ---
 def teardown_client(sock, server_addr):
     sock.settimeout(TIMEOUT)
     print("Connection Teardown:", flush=True)
 
-    # Send FIN
     print("FIN packet is sent", flush=True)
     fin = pack_header(0, 0, FLAG_FIN, 0)
     sock.sendto(fin, server_addr)
 
-    # Receive FIN-ACK
     try:
         data, _ = sock.recvfrom(HEADER_SIZE)
         _, _, flags, _ = unpack_header(data)
@@ -121,69 +113,6 @@ def teardown_client(sock, server_addr):
 
     print("Connection Closes", flush=True)
     sock.close()
-
-
-def teardown_server(sock, addr):
-    data, _ = sock.recvfrom(HEADER_SIZE)
-    _, _, flags, _ = unpack_header(data)
-    if flags & FLAG_FIN:
-        print("FIN packet is received", flush=True)
-
-    finack = pack_header(0, 0, FLAG_FIN | FLAG_ACK, 0)
-    sock.sendto(finack, addr)
-    print("FIN ACK packet is sent", flush=True)
-    print("Connection Closes", flush=True)
-    sock.close()
-
-# --- Client Mode ---
-def client_mode(args):
-    server_addr = (args.ip, args.port)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    print("Connection Establishment Phase:", flush=True)
-    receiver_window = three_way_handshake_client(sock, server_addr)
-    window_size = min(args.window, receiver_window)
-
-    # Prepare packets
-    packets = []
-    seq = 1
-    with open(args.file, 'rb') as f:
-        for chunk in iter(lambda: f.read(DATA_CHUNK), b''):
-            header = pack_header(seq, 0, 0, window_size)
-            packets.append(header + chunk)
-            seq += 1
-
-    total = len(packets)
-    base = 1
-    next_seq = 1
-    sock.settimeout(TIMEOUT)
-
-    print("Data Transfer:", flush=True)
-    while base <= total:
-        # send new packets within window
-        while next_seq < base + window_size and next_seq <= total:
-            # compute sliding window set
-            window_set = ", ".join(str(n) for n in range(base, next_seq + 1))
-            print(f"{timestamp()} -- packet with seq = {next_seq} is sent, sliding window = {{{window_set}}}", flush=True)
-            sock.sendto(packets[next_seq-1], server_addr)
-            next_seq += 1
-
-        # await ACK
-        try:
-            data, _ = sock.recvfrom(HEADER_SIZE)
-            _, ackn, flags, _ = unpack_header(data)
-            if flags & FLAG_ACK:
-                print(f"{timestamp()} -- ACK for packet = {ackn} is received", flush=True)
-                base = ackn + 1
-        except socket.timeout:
-            print(f"{timestamp()} -- RTO occurred", flush=True)
-            # retransmit all unacked
-            for s in range(base, next_seq):
-                print(f"{timestamp()} -- packet with seq = {s} is sent, sliding window = {{{', '.join(str(n) for n in range(base, next_seq))}}}", flush=True)
-                sock.sendto(packets[s-1], server_addr)
-
-    print("DATA Finished", flush=True)
-    teardown_client(sock, server_addr)
 
 # --- Server Mode ---
 def server_mode(args):
@@ -204,7 +133,10 @@ def server_mode(args):
         seq, _, flags, _ = unpack_header(data)
 
         if flags & FLAG_FIN:
-            teardown_server(sock, addr)
+            print(f"{timestamp()} -- FIN packet is received", flush=True)
+            finack = pack_header(0, 0, FLAG_FIN | FLAG_ACK, 0)
+            sock.sendto(finack, addr)
+            print(f"{timestamp()} -- FIN ACK packet is sent", flush=True)
             break
 
         if args.discard and seq == args.discard:
@@ -227,13 +159,61 @@ def server_mode(args):
     mb = os.path.getsize(fname) / 1e6
     throughput = (mb * 8) / elapsed
     print(f"The throughput is {throughput:.2f} Mbps", flush=True)
+    print("Connection Closes", flush=True)
+    sock.close()
 
+# --- Client Mode ---
+def client_mode(args):
+    server_addr = (args.ip, args.port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    print("Connection Establishment Phase:", flush=True)
+    receiver_window = three_way_handshake_client(sock, server_addr)
+    window_size = min(args.window, receiver_window)
+
+    packets = []
+    seq = 1
+    with open(args.file, 'rb') as f_in:
+        for chunk in iter(lambda: f_in.read(DATA_CHUNK), b''):
+            header = pack_header(seq, 0, 0, window_size)
+            packets.append(header + chunk)
+            seq += 1
+
+    total = len(packets)
+    base = 1
+    next_seq = 1
+    sock.settimeout(TIMEOUT)
+
+    print("Data Transfer:", flush=True)
+    while base <= total:
+        while next_seq < base + window_size and next_seq <= total:
+            window_set = ", ".join(str(n) for n in range(base, next_seq + 1))
+            print(f"{timestamp()} -- packet with seq = {next_seq} is sent, sliding window = {{{window_set}}}", flush=True)
+            sock.sendto(packets[next_seq-1], server_addr)
+            next_seq += 1
+
+        try:
+            data, _ = sock.recvfrom(HEADER_SIZE)
+            _, ackn, flags, _ = unpack_header(data)
+            if flags & FLAG_ACK:
+                print(f"{timestamp()} -- ACK for packet = {ackn} is received", flush=True)
+                base = ackn + 1
+        except socket.timeout:
+            print(f"{timestamp()} -- RTO occurred", flush=True)
+            for s in range(base, next_seq):
+                print(f"{timestamp()} -- retransmit packet {s}", flush=True)
+                sock.sendto(packets[s-1], server_addr)
+
+    print("DATA Finished", flush=True)
+    teardown_client(sock, server_addr)
+
+# --- Main ---
 def main():
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-s', '--server', action='store_true', help='run as server')
     group.add_argument('-c', '--client', action='store_true', help='run as client')
-    parser.add_argument('-i', '--ip', default='0.0.0.0', help='server IP (client) or local IP to bind (server)')
+    parser.add_argument('-i', '--ip', default='0.0.0.0', help='server IP or local bind')
     parser.add_argument('-p', '--port', type=int, default=8088, help='port number')
     parser.add_argument('-f', '--file', help='file to send (client only)')
     parser.add_argument('-w', '--window', type=int, default=3, help='sender window size')
