@@ -37,7 +37,7 @@ HEADER_FORMAT = '!HHHH'         # 4 fields, each 16 bits: seq, ack, flags, windo
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 DATA_CHUNK = 992                # payload bytes per packet (8 B header + 992 B data = 1000 B)
 TIMEOUT = 0.4                   # retransmission timeout (400 ms)
-DEFAULT_RECEIVER_WINDOW = 15    # advertised window in SYN-ACK (max in-flight packets)
+DEFAULT_RECEIVER_WINDOW = 25    # advertised window in SYN-ACK (max in-flight packets)
 
 # === DRTP Flag Bits (in header.flags) ===
 FLAG_FIN = 0x1  # end of data / teardown
