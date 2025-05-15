@@ -2,19 +2,28 @@
 """
 Application.py: DRTP File Transfer using UDP + Go-Back-N Reliability.
 
-This script implements a simple reliable transport protocol (DRTP) on top of UDP,
-featuring:
-  - Three-way handshake (SYN, SYN-ACK, ACK)
-  - Go-Back-N sliding-window data transfer
-  - Two-way teardown handshake (FIN, FIN-ACK)
-  - Optional single-packet drop simulation (--discard)
-  - Throughput measurement on the server side
+This script implements a simple reliable data transfer protocol (DRTP) on top of UDP.
+It provides in-order, reliable file transfer between a client (sender) and a server (receiver),
+using a three-way handshake, Go-Back-N sliding-window reliability, and a two-way teardown.
+
+Packet structure (8 B header + up to 992 B data = 1000 B total):
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|  Sequence Number (16)  | Acknowledgment Number (16)           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Flags (16)              | Receiver Window Size (16)            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Application Data (≤ 992 B)               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Flags (bitmask in Flags field):
+  FIN = 0x1 : connection teardown
+  SYN = 0x2 : connection setup
+  RST = 0x4 : reset (unused)
+  ACK = 0x8 : acknowledgment
 
 Usage:
-  Server mode:
-    python3 application.py -s [-i IP] [-p PORT] [-d DISCARD_SEQ]
-  Client mode:
-    python3 application.py -c -f FILE [-i IP] [-p PORT] [-w WINDOW_SIZE]
+  Server: python3 application.py -s [-i IP] [-p PORT] [-d DISCARD_SEQ]
+  Client: python3 application.py -c -f FILE [-i IP] [-p PORT] [-w WINDOW_SIZE]
 """
 
 import socket
@@ -25,16 +34,16 @@ import os
 import sys
 
 # === DRTP Constants ===
-HEADER_FORMAT = '!HHHH'         # seq (16 bits), ack (16 bits), flags (16 bits), window (16 bits)
+HEADER_FORMAT = '!HHHH'         # 4 fields, each 16 bits: seq, ack, flags, window
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-DATA_CHUNK = 992                # bytes per application-data chunk
-TIMEOUT = 0.4                   # retransmission timeout in seconds (400 ms)
-DEFAULT_RECEIVER_WINDOW = 15    # advertised window size in SYN-ACK
+DATA_CHUNK = 992                # payload bytes per packet (8 B header + 992 B data = 1000 B)
+TIMEOUT = 0.4                   # retransmission timeout (400 ms)
+DEFAULT_RECEIVER_WINDOW = 15    # advertised window in SYN-ACK (max in-flight packets)
 
-# === DRTP Flag Bits ===
-FLAG_FIN = 0x1  # connection teardown
-FLAG_SYN = 0x2  # connection setup
-FLAG_RST = 0x4  # reset (unused)
+# === DRTP Flag Bits (in header.flags) ===
+FLAG_FIN = 0x1  # end of data / teardown
+FLAG_SYN = 0x2  # connection initiation
+FLAG_RST = 0x4  # reset (not used)
 FLAG_ACK = 0x8  # acknowledgment
 
 def pack_header(seq, ack, flags, window):
