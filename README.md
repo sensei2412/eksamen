@@ -1,106 +1,56 @@
-from mininet.topo import Topo
-from mininet.net import Mininet
-from mininet.node import Node
-from mininet.log import setLogLevel, info
-from mininet.link import TCLink
-import re
+# DRTP File Transfer Application
 
-def run_experiments(net, server_ip, server_port, filename):
-    """
-    Automate throughput experiments:
-    1) Window sizes [3,5,10,15,20,25] at default RTT
-    2) RTTs [50,100,200] for same windows
-    3) Random loss scenarios [2%,5%,50%]
-    """
-    h1, h2, r = net['h1'], net['h2'], net['r']
-    window_sizes = [3, 5, 10, 15, 20, 25]
-    rtts = [50, 100, 200]
-    losses = [0, 2, 5, 50]
+This archive provides the source code and documentation for the **DATA2410 Reliable Transport Protocol (DRTP)** file-transfer application, implemented in Python.
 
-    # Helper to parse throughput
-    def parse_throughput(output):
-        match = re.search(r"The throughput is ([0-9.]+) Mbps", output)
-        return float(match.group(1)) if match else None
+## Prerequisites
 
-    results = {}
+* Python 3.x installed on your system.
+* No external Python dependencies beyond the standard library.
 
-    # 1) Base RTT tests (100ms)
-    info("*** Running base RTT tests (100ms)\n")
-    r.cmd('tc qdisc change dev r-eth1 root netem delay 100ms')
-    for w in window_sizes:
-        # start server
-        h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-        # run client
-        out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-        tp = parse_throughput(out)
-        results[f"rtt100_w{w}"] = tp
-        h2.cmd('pkill -f application.py')
+* Start mininet with sudo python3 simple.topo.py
 
-    # 2) Varying RTT
-    for rtt in rtts:
-        info(f"*** Running RTT tests ({rtt}ms)\n")
-        r.cmd(f'tc qdisc change dev r-eth1 root netem delay {rtt}ms')
-        for w in window_sizes:
-            h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-            out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-            tp = parse_throughput(out)
-            results[f"rtt{rtt}_w{w}"] = tp
-            h2.cmd('pkill -f application.py')
+## Running the Application
 
-    # 4) Random loss scenarios at 100ms
-    r.cmd('tc qdisc change dev r-eth1 root netem delay 100ms')
-    for loss in losses[1:]:  # skip 0
-        info(f"*** Running loss test ({loss}%)\n")
-        r.cmd(f'tc qdisc change dev r-eth1 root netem delay 100ms loss {loss}%')
-        for w in window_sizes:
-            h2.cmd(f'python3 application.py -s -i {server_ip} -p {server_port} &')
-            out = h1.cmd(f'python3 application.py -c -f {filename} -i {server_ip} -p {server_port} -w {w}')
-            tp = parse_throughput(out)
-            results[f"loss{loss}_w{w}"] = tp
-            h2.cmd('pkill -f application.py')
+1. Open xterm h2 for server
+2. Open xterm h1 for client
+   
 
-    # Print results
-    info("\n*** Experiment Results:\n")
-    for key, val in sorted(results.items()):
-        info(f"{key}: {val} Mbps\n")
+### Server (Receiver) on h2
 
+1. Start the server on: Python3 application.py -s -i 10.0.1.2 -p 8080
 
-topo = Topo()  # Your NetworkTopo definition replaced here
-# (Insert your NetworkTopo class building as before)
-class LinuxRouter(Node):
-    def config(self, **params):
-        super().config(**params)
-        self.cmd('sysctl net.ipv4.ip_forward=1')
-    def terminate(self):
-        self.cmd('sysctl net.ipv4.ip_forward=0')
-        super().terminate()
+   python3 application.py -s -i <SERVER_IP> - `-p`: UDP port to listen on (default: `8080`))
+   - `-d`: (optional) simulate a one-time drop of packet with sequence number `DISCARD_SEQ`
+   ```
+   
 
-class NetworkTopo(Topo):
-    def build(self, **_opts):        
-        h1 = self.addHost('h1', ip=None)
-        r = self.addNode('r', cls=LinuxRouter, ip=None)
-        h2 = self.addHost('h2', ip=None)
-        self.addLink(h1, r, params1={'ip': '10.0.0.1/24'}, params2={'ip': '10.0.0.2/24'})
-        self.addLink(r, h2, params1={'ip': '10.0.1.1/24'}, params2={'ip': '10.0.1.2/24'})
+### Client (Sender) on h1
 
-def main():
-    setLogLevel('info')
-    topo = NetworkTopo()
-    net = Mininet(topo=topo, link=TCLink)
-    net.start()
-    # Configure routing
-    net['h1'].cmd("ip route add 10.0.1.0/24 via 10.0.0.2")
-    net['h2'].cmd("ip route add 10.0.0.0/24 via 10.0.1.1")
-    # Disable offloads
-    for host in ['h1', 'h2']:
-        for opt in ['tso', 'gso', 'lro', 'gro', 'ufo']:
-            net[host].cmd(f'ethtool -K {host}-eth0 {opt} off')
-    # Initial delay
-    net['r'].cmd('tc qdisc add dev r-eth1 root netem delay 100ms')
-    net.pingAll()
-    # Run automated experiments
-    run_experiments(net, server_ip='10.0.1.2', server_port=8088, filename='test10MB.bin')
-    net.stop()
+1. In a separate terminal, still in the directory, run: Python3 applicaion.py -c -f Photo.jpg -i 10.0.1.2 -p 8080 -w 15
+    
+   ```bash
+   python3 application.py -c -f <FILE_TO_SEND> -i <SERVER_IP> -p <PORT> -w <WINDOW_SIZE>
+   ```
 
-if __name__ == '__main__':
-    main()
+   * `-c` / `--client`: launch in client mode
+   * `-f`: path to the file you wish to send
+   * `-i`: IP address of the server
+   * `-p`: UDP port of the server
+   * `-w`: sender window size (default: `3`)
+
+## Example Workflow
+
+1. **Start server** on port 8080 (bind to all interfaces or localhost):
+
+   ```bash
+   # bind to all interfaces (default)
+   python3 application.py -s -p 8080
+   # or bind explicitly to server's LAN IP
+   python3 application.py -s -i 10.0.1.2 -p 8080
+   ```
+2. **Send file** `photo.jpg` with window size 5:
+
+   ```bash
+   python3 application.py -c -f photo.jpg -i 10.0.1.2 -p 8080 -w 5
+   ```
+3. Observe the console logs on both sides for handshake, data-transfer, and teardown phases.
