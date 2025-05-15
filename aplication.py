@@ -9,7 +9,7 @@ HEADER_FORMAT = '!HHHH'  # seq (16), ack (16), flags (16), window (16)
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 DATA_CHUNK = 992  # bytes per chunk
 TIMEOUT = 0.4  # 400 ms
-DEFAULT_WINDOW = 3
+DEFAULT_WINDOW = 15
 
 # Flags positions
 FLAG_FIN = 0x1
