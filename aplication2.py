@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Application.py: DRTP File Transfer using UDP + Go-Back-N Reliability.
 
