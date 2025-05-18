@@ -1,9 +1,19 @@
-# Application.py: DRTP File Transfer using UDP + Go-Back-N Reliability
+"""
+Application.py: DRTP File Transfer using UDP + Go-Back-N Reliability.
 
-# Description:
-# This script implements a simple reliable transport protocol on top of UDP using
-# a Go-Back-N sliding window and a custom header format. It supports file transfer
-# between a client and a server.
+This script implements a simple reliable data transfer protocol (DRTP) on top of UDP.
+It provides in-order, reliable file transfer between a client (sender) and a server (receiver),
+using a three-way handshake, Go-Back-N sliding-window reliability, and a two-way teardown.
+
+Packet structure (8 B header + up to 992 B data = 1000 B total):
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|  Sequence Number (16)  | Acknowledgment Number (16)           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Flags (16)              | Receiver Window Size (16)            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Application Data (≤ 992 B)               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+"""
 
 import socket       # For network communication
 import struct       # For packing/unpacking binary headers
